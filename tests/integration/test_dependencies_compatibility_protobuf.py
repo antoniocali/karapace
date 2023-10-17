@@ -4,6 +4,7 @@ karapace - schema tests
 Copyright (c) 2019 Aiven Ltd
 See LICENSE for details
 """
+
 from karapace.client import Client
 from karapace.protobuf.kotlin_wrapper import trim_margin
 from tests.utils import create_subject_name_factory
@@ -669,3 +670,196 @@ message Customer {
     res = await registry_async_client.post(f"subjects/{subject_customer}/versions", json=body)
 
     assert res.status_code == 200
+
+
+async def test_protobuf_schema_compatibility_full_path_renaming():
+    dependency = """\
+    package "my.awesome.customer.delivery";
+    message RequestId {
+     string request_id = 1;
+    }\
+    """
+
+    original_full_path = """\
+    import "my/awesome/customer/delivery/v1beta1/request_id.proto";
+    message MessageRequest {
+     my.awesome.customer.delivery.v1beta1.RequestId request_id = 1;
+    }\
+    """
+
+    evolved_partial_path = """\
+    import "my/awesome/customer/delivery/v1beta1/request_id.proto";
+    message MessageRequest {
+     awesome.customer.delivery.v1beta1.RequestId request_id = 1;
+    }\
+    """
+
+    # placeholder for a real test
+    assert dependency + original_full_path + evolved_partial_path != ""
+
+
+async def test_protobuf_schema_compatibility_partial_path_renaming():
+    dependency = """\
+    package "my.awesome.customer.delivery";
+    message RequestId {
+     string request_id = 1;
+    }\
+    """
+
+    original_partial_path = """\
+    import "my/awesome/customer/delivery/v1beta1/request_id.proto";
+    message MessageRequest {
+     my.awesome.customer.delivery.v1beta1.RequestId request_id = 1;
+    }\
+    """
+
+    evolved_full_path = """\
+    import "my/awesome/customer/delivery/v1beta1/request_id.proto";
+    message MessageRequest {
+     awesome.customer.delivery.v1beta1.RequestId request_id = 1;
+    }\
+    """
+
+    # placeholder for a real test
+    assert dependency + original_partial_path + evolved_full_path != ""
+
+
+async def test_protobuf_schema_compatibility_import_renaming_should_fail():
+    dependency = """\
+        package "my.awesome.customer.delivery";
+        message RequestId {
+         string request_id = 1;
+        }\
+        """
+
+    updated_dependency = """\
+            package "awesome.customer.delivery";
+            message RequestId {
+             string request_id = 1;
+            }\
+            """
+
+    original_partial_path = """\
+        import "my/awesome/customer/delivery/v1beta1/request_id.proto";
+        import "awesome/customer/delivery/v1beta1/request_id.proto";
+
+        message MessageRequest {
+         awesome.customer.delivery.v1beta1.RequestId request_id = 1;
+        }\
+        """
+
+    evolved_partial_path = """\
+        import "awesome/customer/delivery/v1beta1/request_id.proto";
+        import "my/awesome/customer/delivery/v1beta1/request_id.proto";
+
+        message MessageRequest {
+         awesome.customer.delivery.v1beta1.RequestId request_id = 1;
+        }\
+        """
+
+    # placeholder for a real test
+    assert dependency + original_partial_path + evolved_partial_path + updated_dependency != ""
+    # this should fail because now it's referring to the other object.
+
+
+@pytest.mark.parametrize("compatibility,expected_to_fail", [("FULL", True), ("FORWARD", True), ("BACKWARD", False)])
+async def test_protobuf_schema_update_add_message(
+    registry_async_client: Client,
+    compatibility: str,
+    expected_to_fail: bool,
+) -> None:
+    subject_place = create_subject_name_factory("test_protobuf_place")()
+    subject_customer = create_subject_name_factory("test_protobuf_customer")()
+
+    for subject in [subject_place, subject_customer]:
+        res = await registry_async_client.put(f"config/{subject}", json={"compatibility": compatibility})
+        assert res.status_code == 200
+
+    place_proto = """\
+syntax = "proto3";
+package a1;
+message Place {
+        string city = 1;
+        int32 zone = 2;
+}
+"""
+
+    body = {"schemaType": "PROTOBUF", "schema": place_proto}
+    res = await registry_async_client.post(f"subjects/{subject_place}/versions", json=body)
+
+    assert res.status_code == 200
+
+    customer_proto = """\
+syntax = "proto3";
+package a1;
+import "place.proto";
+import "google/type/postal_address.proto";
+// @producer: another comment
+message Customer {
+        string name = 1;
+        int32 code = 2;
+        Place place = 3;
+        google.type.PostalAddress address = 4;
+}
+"""
+    body = {
+        "schemaType": "PROTOBUF",
+        "schema": customer_proto,
+        "references": [
+            {
+                "name": "place.proto",
+                "subject": subject_place,
+                "version": -1,
+            }
+        ],
+    }
+    res = await registry_async_client.post(f"subjects/{subject_customer}/versions", json=body)
+
+    assert res.status_code == 200
+
+    customer_proto_updated = """\
+syntax = "proto3";
+package a1;
+
+import "place.proto";
+import "google/type/postal_address.proto";
+
+// @consumer: the comment was incorrect, updating it now
+message Customer {
+  string name = 1;
+  int32 code = 2;
+  Place place = 3;
+  google.type.PostalAddress address = 4;
+}
+message Bar {
+  string another = 1;
+}
+"""
+
+    body = {
+        "schemaType": "PROTOBUF",
+        "schema": customer_proto_updated,
+        "references": [
+            {
+                "name": "place.proto",
+                "subject": subject_place,
+                "version": -1,
+            }
+        ],
+    }
+    res = await registry_async_client.post(f"subjects/{subject_customer}/versions", json=body)
+
+    if expected_to_fail:
+        assert res.status_code == 409
+        assert res.json() == {
+            "message": f"Incompatible schema, compatibility_mode={compatibility} Incompatible modification "
+            f"Modification.MESSAGE_DROP found",
+            "error_code": 409,
+        }
+    else:
+        assert res.status_code == 200
+
+        res = await registry_async_client.get(f"subjects/{subject_customer}/versions/2")
+
+        assert res.status_code == 200
+        assert res.json()["schema"] == customer_proto_updated
