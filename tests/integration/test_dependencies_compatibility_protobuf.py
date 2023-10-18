@@ -7,6 +7,7 @@ See LICENSE for details
 
 from karapace.client import Client
 from karapace.protobuf.kotlin_wrapper import trim_margin
+from karapace.typing import Subject
 from tests.utils import create_subject_name_factory
 
 import pytest
@@ -672,15 +673,24 @@ message Customer {
     assert res.status_code == 200
 
 
-async def test_protobuf_schema_compatibility_full_path_renaming():
+async def test_protobuf_schema_compatibility_full_path_renaming(registry_async_client: Client) -> None:
+    subject_dependency = Subject("dependency")
+    subject_entity = Subject("entity")
+
+    for subject in [subject_dependency, subject_entity]:
+        res = await registry_async_client.put(f"config/{subject}", json={"compatibility": "FULL"})
+        assert res.status_code == 200
+
     dependency = """\
-    package "my.awesome.customer.request";
+    syntax = "proto3";
+    package my.awesome.customer.request.v1beta1;
     message RequestId {
      string request_id = 1;
     }\
     """
 
     original_full_path = """\
+    syntax = "proto3";
     import "my/awesome/customer/request/v1beta1/request_id.proto";
     message MessageRequest {
      my.awesome.customer.request.v1beta1.RequestId request_id = 1;
@@ -688,25 +698,72 @@ async def test_protobuf_schema_compatibility_full_path_renaming():
     """
 
     evolved_partial_path = """\
+    syntax = "proto3";
     import "my/awesome/customer/request/v1beta1/request_id.proto";
     message MessageRequest {
      awesome.customer.request.v1beta1.RequestId request_id = 1;
     }\
     """
 
-    # placeholder for a real test
-    assert dependency + original_full_path + evolved_partial_path != ""
+    # registering the dependency
+    body = {"schemaType": "PROTOBUF", "schema": dependency}
+    res = await registry_async_client.post(f"subjects/{subject_dependency}/versions", json=body)
+
+    assert res.status_code == 200
+
+    # registering the entity
+
+    body = {
+        "schemaType": "PROTOBUF",
+        "schema": original_full_path,
+        "references": [
+            {
+                "name": "place.proto",
+                "subject": subject_dependency,
+                "version": -1,
+            }
+        ],
+    }
+    res = await registry_async_client.post(f"subjects/{subject_entity}/versions", json=body)
+    assert res.status_code == 200
+    previous_id = res.json()["id"]
+
+    # registering the evolved entity
+
+    body = {
+        "schemaType": "PROTOBUF",
+        "schema": evolved_partial_path,
+        "references": [
+            {
+                "name": "place.proto",
+                "subject": subject_dependency,
+                "version": -1,
+            }
+        ],
+    }
+    res = await registry_async_client.post(f"subjects/{subject_entity}/versions", json=body)
+    assert res.status_code == 200
+    assert res.json()["id"] == previous_id
 
 
-async def test_protobuf_schema_compatibility_partial_path_renaming():
+async def test_protobuf_schema_compatibility_partial_path_renaming(registry_async_client: Client) -> None:
+    subject_dependency = Subject("dependency")
+    subject_entity = Subject("entity")
+
+    for subject in [subject_dependency, subject_entity]:
+        res = await registry_async_client.put(f"config/{subject}", json={"compatibility": "FULL"})
+        assert res.status_code == 200
+
     dependency = """\
-    package "my.awesome.customer.request";
+    syntax = "proto3";
+    package my.awesome.customer.request.v1beta1;
     message RequestId {
      string request_id = 1;
     }\
     """
 
     original_partial_path = """\
+    syntax = "proto3";
     import "my/awesome/customer/request/v1beta1/request_id.proto";
     message MessageRequest {
      my.awesome.customer.request.v1beta1.RequestId request_id = 1;
@@ -714,32 +771,83 @@ async def test_protobuf_schema_compatibility_partial_path_renaming():
     """
 
     evolved_full_path = """\
+    syntax = "proto3";
     import "my/awesome/customer/request/v1beta1/request_id.proto";
     message MessageRequest {
      awesome.customer.request.v1beta1.RequestId request_id = 1;
     }\
     """
 
-    # placeholder for a real test
-    assert dependency + original_partial_path + evolved_full_path != ""
+    # registering the dependency
+    body = {"schemaType": "PROTOBUF", "schema": dependency}
+    res = await registry_async_client.post(f"subjects/{subject_dependency}/versions", json=body)
+
+    assert res.status_code == 200
+
+    # registering the entity
+
+    body = {
+        "schemaType": "PROTOBUF",
+        "schema": original_partial_path,
+        "references": [
+            {
+                "name": "place.proto",
+                "subject": subject_dependency,
+                "version": -1,
+            }
+        ],
+    }
+    res = await registry_async_client.post(f"subjects/{subject_entity}/versions", json=body)
+    assert res.status_code == 200
+    previous_id = res.json()["id"]
+
+    # registering the evolved entity
+
+    body = {
+        "schemaType": "PROTOBUF",
+        "schema": evolved_full_path,
+        "references": [
+            {
+                "name": "place.proto",
+                "subject": subject_dependency,
+                "version": -1,
+            }
+        ],
+    }
+    res = await registry_async_client.post(f"subjects/{subject_entity}/versions", json=body)
+    assert res.status_code == 200
+    assert (
+        res.json()["id"] == previous_id
+    ), "The registered schema should be recognized as the same, no evolutions are being applied"
 
 
-async def test_protobuf_schema_compatibility_import_renaming_should_fail():
-    dependency = """\
-        package "my.awesome.customer.request";
+async def test_protobuf_schema_compatibility_import_renaming_should_fail(registry_async_client: Client) -> None:
+    first_subject_dependency = Subject("first_dependency")
+    second_subject_dependency = Subject("second_dependency")
+    subject_entity = Subject("entity")
+
+    for subject in [first_subject_dependency, second_subject_dependency, subject_entity]:
+        res = await registry_async_client.put(f"config/{subject}", json={"compatibility": "FULL"})
+        assert res.status_code == 200
+
+    first_dependency = """\
+        syntax = "proto3";
+        package my.awesome.customer.request.v1beta1;
         message RequestId {
          string request_id = 1;
         }\
         """
 
-    updated_dependency = """\
-            package "awesome.customer.request";
+    second_dependency = """\
+            syntax = "proto3";
+            package awesome.customer.request.v1beta1;
             message RequestId {
              string request_id = 1;
             }\
             """
 
     original_partial_path = """\
+        syntax = "proto3";
         import "my/awesome/customer/request/v1beta1/request_id.proto";
         import "awesome/customer/request/v1beta1/request_id.proto";
 
@@ -749,6 +857,7 @@ async def test_protobuf_schema_compatibility_import_renaming_should_fail():
         """
 
     evolved_partial_path = """\
+        syntax = "proto3";
         import "awesome/customer/request/v1beta1/request_id.proto";
         import "my/awesome/customer/request/v1beta1/request_id.proto";
 
@@ -757,9 +866,57 @@ async def test_protobuf_schema_compatibility_import_renaming_should_fail():
         }\
         """
 
-    # placeholder for a real test
-    assert dependency + original_partial_path + evolved_partial_path + updated_dependency != ""
-    # this should fail because now it's referring to the other object.
+    # registering the first dependency
+    body = {"schemaType": "PROTOBUF", "schema": first_dependency}
+    res = await registry_async_client.post(f"subjects/{first_subject_dependency}/versions", json=body)
+
+    assert res.status_code == 200
+
+    # registering the second dependency
+    body = {"schemaType": "PROTOBUF", "schema": second_dependency}
+    res = await registry_async_client.post(f"subjects/{second_subject_dependency}/versions", json=body)
+
+    assert res.status_code == 200
+
+    # registering the entity
+    body = {
+        "schemaType": "PROTOBUF",
+        "schema": original_partial_path,
+        "references": [
+            {
+                "name": f"{first_subject_dependency}.proto",
+                "subject": first_subject_dependency,
+                "version": -1,
+            },
+            {
+                "name": f"{second_subject_dependency}.proto",
+                "subject": second_subject_dependency,
+                "version": -1,
+            },
+        ],
+    }
+    res = await registry_async_client.post(f"subjects/{subject_entity}/versions", json=body)
+    assert res.status_code == 200
+
+    # registering the evolved entity
+    body = {
+        "schemaType": "PROTOBUF",
+        "schema": evolved_partial_path,
+        "references": [
+            {
+                "name": f"{first_subject_dependency}.proto",
+                "subject": first_subject_dependency,
+                "version": -1,
+            },
+            {
+                "name": f"{second_subject_dependency}.proto",
+                "subject": second_subject_dependency,
+                "version": -1,
+            },
+        ],
+    }
+    res = await registry_async_client.post(f"subjects/{subject_entity}/versions", json=body)
+    assert res.status_code != 200, "The real used type is changed due to the relative import."
 
 
 @pytest.mark.parametrize("compatibility,expected_to_fail", [("FULL", True), ("FORWARD", True), ("BACKWARD", False)])
