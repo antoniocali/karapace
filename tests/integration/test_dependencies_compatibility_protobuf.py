@@ -674,23 +674,23 @@ message Customer {
 
 async def test_protobuf_schema_compatibility_full_path_renaming():
     dependency = """\
-    package "my.awesome.customer.delivery";
+    package "my.awesome.customer.request";
     message RequestId {
      string request_id = 1;
     }\
     """
 
     original_full_path = """\
-    import "my/awesome/customer/delivery/v1beta1/request_id.proto";
+    import "my/awesome/customer/request/v1beta1/request_id.proto";
     message MessageRequest {
-     my.awesome.customer.delivery.v1beta1.RequestId request_id = 1;
+     my.awesome.customer.request.v1beta1.RequestId request_id = 1;
     }\
     """
 
     evolved_partial_path = """\
-    import "my/awesome/customer/delivery/v1beta1/request_id.proto";
+    import "my/awesome/customer/request/v1beta1/request_id.proto";
     message MessageRequest {
-     awesome.customer.delivery.v1beta1.RequestId request_id = 1;
+     awesome.customer.request.v1beta1.RequestId request_id = 1;
     }\
     """
 
@@ -700,23 +700,23 @@ async def test_protobuf_schema_compatibility_full_path_renaming():
 
 async def test_protobuf_schema_compatibility_partial_path_renaming():
     dependency = """\
-    package "my.awesome.customer.delivery";
+    package "my.awesome.customer.request";
     message RequestId {
      string request_id = 1;
     }\
     """
 
     original_partial_path = """\
-    import "my/awesome/customer/delivery/v1beta1/request_id.proto";
+    import "my/awesome/customer/request/v1beta1/request_id.proto";
     message MessageRequest {
-     my.awesome.customer.delivery.v1beta1.RequestId request_id = 1;
+     my.awesome.customer.request.v1beta1.RequestId request_id = 1;
     }\
     """
 
     evolved_full_path = """\
-    import "my/awesome/customer/delivery/v1beta1/request_id.proto";
+    import "my/awesome/customer/request/v1beta1/request_id.proto";
     message MessageRequest {
-     awesome.customer.delivery.v1beta1.RequestId request_id = 1;
+     awesome.customer.request.v1beta1.RequestId request_id = 1;
     }\
     """
 
@@ -726,34 +726,34 @@ async def test_protobuf_schema_compatibility_partial_path_renaming():
 
 async def test_protobuf_schema_compatibility_import_renaming_should_fail():
     dependency = """\
-        package "my.awesome.customer.delivery";
+        package "my.awesome.customer.request";
         message RequestId {
          string request_id = 1;
         }\
         """
 
     updated_dependency = """\
-            package "awesome.customer.delivery";
+            package "awesome.customer.request";
             message RequestId {
              string request_id = 1;
             }\
             """
 
     original_partial_path = """\
-        import "my/awesome/customer/delivery/v1beta1/request_id.proto";
-        import "awesome/customer/delivery/v1beta1/request_id.proto";
+        import "my/awesome/customer/request/v1beta1/request_id.proto";
+        import "awesome/customer/request/v1beta1/request_id.proto";
 
         message MessageRequest {
-         awesome.customer.delivery.v1beta1.RequestId request_id = 1;
+         awesome.customer.request.v1beta1.RequestId request_id = 1;
         }\
         """
 
     evolved_partial_path = """\
-        import "awesome/customer/delivery/v1beta1/request_id.proto";
-        import "my/awesome/customer/delivery/v1beta1/request_id.proto";
+        import "awesome/customer/request/v1beta1/request_id.proto";
+        import "my/awesome/customer/request/v1beta1/request_id.proto";
 
         message MessageRequest {
-         awesome.customer.delivery.v1beta1.RequestId request_id = 1;
+         awesome.customer.request.v1beta1.RequestId request_id = 1;
         }\
         """
 
